@@ -1,6 +1,6 @@
 use crate::app::{App, Mode};
 use top_dog_core::{display_text, view::View};
-use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 pub struct Line {
     pub text: String,
@@ -17,13 +17,18 @@ impl From<String> for Line {
 
 pub fn clip(text: &str, width: usize) -> String {
     let text = display_text(text);
-    let mut n = 0;
-    text.chars()
-        .take_while(|c| {
-            n += c.width().unwrap_or(0);
-            n <= width
-        })
-        .collect()
+    if text.width() <= width {
+        return text;
+    }
+    let mut end = 0;
+    for (index, c) in text.char_indices() {
+        let next = index + c.len_utf8();
+        if text[..next].width() > width {
+            break;
+        }
+        end = next;
+    }
+    text[..end].to_string()
 }
 
 pub fn bytes(n: u64) -> String {
@@ -74,6 +79,53 @@ pub fn summary(view: &View) -> Vec<Line> {
     ]
 }
 
+#[derive(Clone, Copy)]
+enum Alignment {
+    Left,
+    Right,
+}
+
+const PROCESS_COLUMNS: [(&str, usize, Alignment); 10] = [
+    ("PID", 8, Alignment::Right),
+    ("USER", 9, Alignment::Left),
+    ("PR", 4, Alignment::Right),
+    ("NI", 3, Alignment::Right),
+    ("S", 1, Alignment::Left),
+    ("CPU%", 7, Alignment::Right),
+    ("MEM%", 5, Alignment::Right),
+    ("VIRT", 7, Alignment::Right),
+    ("RES", 7, Alignment::Right),
+    ("TIME", 8, Alignment::Right),
+];
+
+fn process_row(values: [String; 10], command: &str) -> String {
+    let mut row = String::new();
+    for (value, (_, width, alignment)) in values.iter().zip(PROCESS_COLUMNS) {
+        let mut value = display_text(value);
+        if value.width() > width {
+            value = match alignment {
+                Alignment::Left => format!("{}…", clip(&value, width - 1)),
+                // A shortened number could look like a valid, smaller measurement.
+                Alignment::Right => "#".repeat(width),
+            };
+        }
+        let padding = " ".repeat(width - value.width());
+        match alignment {
+            Alignment::Left => {
+                row.push_str(&value);
+                row.push_str(&padding);
+            }
+            Alignment::Right => {
+                row.push_str(&padding);
+                row.push_str(&value);
+            }
+        }
+        row.push(' ');
+    }
+    row.push_str(&display_text(command));
+    row
+}
+
 pub fn process_lines(view: &View, height: usize) -> Vec<Line> {
     let mut out = summary(view);
     out.push(
@@ -90,9 +142,11 @@ pub fn process_lines(view: &View, height: usize) -> Vec<Line> {
         .into(),
     );
     out.push(
-        "     PID USER       PR  NI S    CPU%  MEM%    VIRT     RES     TIME COMMAND"
-            .to_string()
-            .into(),
+        process_row(
+            PROCESS_COLUMNS.map(|(label, _, _)| label.to_string()),
+            "COMMAND",
+        )
+        .into(),
     );
     let rows = view.rows();
     let capacity = height.saturating_sub(out.len());
@@ -109,20 +163,20 @@ pub fn process_lines(view: &View, height: usize) -> Vec<Line> {
         let seconds = p.cpu_ticks / view.snapshot.clock_ticks.max(1);
         out.push(Line {
             selected: Some(p.id()) == view.selected,
-            text: format!(
-                "{:>8} {:<9} {:>3} {:>3} {} {:>7} {:>5.1} {:>7} {:>7} {:>5}:{:02} {}",
-                p.id().pid,
-                clip(&p.user, 9),
-                p.priority,
-                p.nice,
-                p.state,
-                percentage(p.cpu_percent),
-                p.memory_percent,
-                bytes(p.virtual_bytes),
-                bytes(p.resident_bytes),
-                seconds / 60,
-                seconds % 60,
-                display_text(&p.command)
+            text: process_row(
+                [
+                    p.id().pid.to_string(),
+                    p.user.clone(),
+                    p.priority.to_string(),
+                    p.nice.to_string(),
+                    p.state.to_string(),
+                    percentage(p.cpu_percent),
+                    format!("{:.1}", p.memory_percent),
+                    bytes(p.virtual_bytes),
+                    bytes(p.resident_bytes),
+                    format!("{}:{:02}", seconds / 60, seconds % 60),
+                ],
+                &p.command,
             ),
         });
     }
@@ -239,8 +293,131 @@ mod tests {
     fn clips_wide_unicode_and_removes_escape_sequences() {
         assert_eq!(clip("日本語", 4), "日本");
         assert_eq!(clip("a\x1b[31mb", 2), "ab");
+        assert_eq!(clip("❤\u{fe0f}", 1), "❤");
+        assert_eq!(clip("❤\u{fe0f}", 2), "❤\u{fe0f}");
+        assert_eq!(clip("👩‍💻x", 2), "👩‍💻");
         assert_eq!(bytes(1024), "1.0K");
     }
+    fn table_fixture(user: &str) -> View {
+        let mut view = View::default();
+        view.replace(Snapshot {
+            clock_ticks: 100,
+            processes: vec![Process {
+                identity: Some(ProcessIdentity {
+                    pid: 42,
+                    start_ticks: 1,
+                }),
+                user: user.into(),
+                priority: 20,
+                nice: -5,
+                state: 'R',
+                cpu_percent: Some(12.3),
+                memory_percent: 4.5,
+                virtual_bytes: 1024,
+                resident_bytes: 512,
+                cpu_ticks: 12_300,
+                command: "command-marker".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        view
+    }
+
+    fn display_column(text: &str, needle: &str) -> usize {
+        unicode_width::UnicodeWidthStr::width(&text[..text.find(needle).unwrap()])
+    }
+
+    #[test]
+    fn process_columns_align_with_header() {
+        let lines = process_lines(&table_fixture("user"), 10);
+        let header = &lines[3].text;
+        let row = &lines[4].text;
+        for (label, value) in [
+            ("PID", "42"),
+            ("PR", "20"),
+            ("NI", "-5"),
+            ("CPU%", "12.3"),
+            ("MEM%", "4.5"),
+            ("VIRT", "1.0K"),
+            ("RES", "512B"),
+            ("TIME", "2:03"),
+        ] {
+            assert_eq!(
+                display_column(row, value) + value.len(),
+                display_column(header, label) + label.len(),
+                "{label}: {row}"
+            );
+        }
+        assert_eq!(display_column(row, "user"), display_column(header, "USER"));
+        assert_eq!(display_column(row, "R"), display_column(header, " S ") + 1);
+        assert_eq!(
+            display_column(row, "command-marker"),
+            display_column(header, "COMMAND")
+        );
+    }
+
+    #[test]
+    fn process_columns_stay_bounded_with_long_and_unicode_values() {
+        let reference = process_lines(&table_fixture("user"), 10);
+        let command_column = display_column(&reference[3].text, "COMMAND");
+        for user in [
+            "very-long-username",
+            "日本語の利用者",
+            "e\u{301}e\u{301}e\u{301}",
+            "❤\u{fe0f}".repeat(8).as_str(),
+        ] {
+            let lines = process_lines(&table_fixture(user), 10);
+            assert_eq!(
+                display_column(&lines[4].text, "command-marker"),
+                command_column,
+                "user {user:?}"
+            );
+        }
+        for field in [
+            "pid", "priority", "nice", "cpu", "memory", "virtual", "resident", "time",
+        ] {
+            let mut view = table_fixture("user");
+            let process = &mut view.snapshot.processes[0];
+            match field {
+                "pid" => process.identity.as_mut().unwrap().pid = i32::MAX,
+                "priority" => process.priority = i64::MIN,
+                "nice" => process.nice = i64::MIN,
+                "cpu" => process.cpu_percent = Some(1e20),
+                "memory" => process.memory_percent = 1e20,
+                "virtual" => process.virtual_bytes = u64::MAX,
+                "resident" => process.resident_bytes = u64::MAX,
+                "time" => process.cpu_ticks = u64::MAX,
+                _ => unreachable!(),
+            }
+            let lines = process_lines(&view, 10);
+            assert_eq!(
+                display_column(&lines[4].text, "command-marker"),
+                command_column,
+                "overflow in {field}"
+            );
+            assert!(
+                lines[4].text.contains('#'),
+                "missing overflow marker for {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn screen_bounds_long_unicode_commands_after_resize() {
+        let mut app = App::new(Config::default());
+        app.view = table_fixture("日本語の利用者");
+        app.view.snapshot.processes[0].command = "❤\u{fe0f}👩‍💻日本語 e\u{301}".repeat(100);
+        for width in [0, 1, 2, 40, 68, 69, 70, 71, 80, 100, 120] {
+            let lines = screen(&app, width, 24);
+            assert!(lines.iter().any(|line| line.selected));
+            assert!(
+                lines.iter().all(|line| line.text.width() <= width),
+                "width {width}"
+            );
+        }
+    }
+
     #[test]
     fn renders_selection_and_survives_small_resizes() {
         let mut app = App::new(Config::default());
