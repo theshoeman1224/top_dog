@@ -1,0 +1,8 @@
+/target/
+/dist/
+*.log
+/.agents/
+/.aws/
+/.codex/
+/.top-dog-publish/
+

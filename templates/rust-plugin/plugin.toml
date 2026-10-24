@@ -1,0 +1,6 @@
+[[plugins]]
+name = "template"
+protocol_version = 1
+executable = "../../target/debug/top-dog-plugin-template"
+args = []
+match_executables = ["replace-with-application-executable"]

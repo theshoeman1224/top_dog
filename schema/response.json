@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Response",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/Reply"
+        },
+        "status": {
+          "type": "string",
+          "const": "ok"
+        }
+      },
+      "required": [
+        "status",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/PluginError"
+        },
+        "status": {
+          "type": "string",
+          "const": "error"
+        }
+      },
+      "required": [
+        "status",
+        "data"
+      ]
+    }
+  ],
+  "required": [
+    "version",
+    "id"
+  ],
+  "$defs": {
+    "Activation": {
+      "type": "object",
+      "properties": {
+        "focus": {
+          "$ref": "#/$defs/FocusResult"
+        },
+        "message": {
+          "type": "string"
+        },
+        "selected": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "selected",
+        "focus",
+        "message"
+      ]
+    },
+    "ErrorCode": {
+      "type": "string",
+      "enum": [
+        "incompatible_version",
+        "invalid_request",
+        "unavailable",
+        "permission_denied",
+        "stale_process",
+        "stale_target",
+        "unsupported",
+        "internal"
+      ]
+    },
+    "FocusResult": {
+      "type": "string",
+      "enum": [
+        "confirmed",
+        "requested",
+        "denied",
+        "unsupported"
+      ]
+    },
+    "PluginError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "ProcessIdentity": {
+      "type": "object",
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "start_ticks": {
+          "description": "Linux /proc/PID/stat starttime, in clock ticks since boot.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "pid",
+        "start_ticks"
+      ]
+    },
+    "Relationship": {
+      "type": "string",
+      "enum": [
+        "main_page",
+        "embedded_frame",
+        "application"
+      ]
+    },
+    "Reply": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "description"
+            },
+            "value": {
+              "type": "object",
+              "properties": {
+                "capabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "name": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version",
+                "capabilities"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "diagnosis"
+            },
+            "value": {
+              "type": "object",
+              "properties": {
+                "available": {
+                  "type": "boolean"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "available",
+                "message"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "resolution"
+            },
+            "value": {
+              "$ref": "#/$defs/Resolution"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "activation"
+            },
+            "value": {
+              "$ref": "#/$defs/Activation"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        }
+      ]
+    },
+    "Resolution": {
+      "type": "object",
+      "properties": {
+        "application": {
+          "type": "string"
+        },
+        "process": {
+          "$ref": "#/$defs/ProcessIdentity"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Target"
+          }
+        }
+      },
+      "required": [
+        "process",
+        "application",
+        "summary",
+        "targets"
+      ]
+    },
+    "Target": {
+      "type": "object",
+      "properties": {
+        "can_activate": {
+          "type": "boolean"
+        },
+        "id": {
+          "description": "Opaque to the monitor. Must be revalidated by the plugin on activation.",
+          "type": "string"
+        },
+        "relationship": {
+          "$ref": "#/$defs/Relationship"
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "window": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "window",
+        "relationship",
+        "can_activate"
+      ]
+    }
+  }
+}

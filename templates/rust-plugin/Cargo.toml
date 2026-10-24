@@ -1,0 +1,11 @@
+[package]
+name = "top-dog-plugin-template"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+top-dog-core.workspace = true
+top-dog-protocol.workspace = true
+

@@ -1,0 +1,46 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: node plugins/firefox/tests/bridge.test.cjs
+      - run: cargo build --workspace --locked
+      - run: python3 scripts/check-plugin.py target/debug/top-dog-plugin-template
+      - run: python3 scripts/check-plugin.py target/debug/top-dog-firefox
+      - run: python3 scripts/test-terminal.py target/debug/top-dog
+      - name: Verify generated schemas
+        run: |
+          cargo run -p top-dog-protocol --example schema --locked > /tmp/top-dog-request.json
+          cargo run -p top-dog-protocol --example response-schema --locked > /tmp/top-dog-response.json
+          cmp schema/request.json /tmp/top-dog-request.json
+          cmp schema/response.json /tmp/top-dog-response.json
+  firefox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: browser-actions/setup-firefox@latest
+        id: firefox
+        with:
+          firefox-version: latest
+      - run: cargo test -p top-dog-firefox --test live --locked -- --ignored
+        env:
+          TOP_DOG_FIREFOX_BINARY: ${{ steps.firefox.outputs.firefox-path }}

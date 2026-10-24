@@ -1,0 +1,11 @@
+refresh_ms = 1000
+plugin_timeout_ms = 10000
+
+[[plugins]]
+name = "firefox"
+protocol_version = 1
+# Relative to this file, so this example works from the checkout after a release build.
+# When installing the config under ~/.config, use an absolute installed binary path.
+executable = "../target/release/top-dog-firefox"
+args = ["--endpoint", "127.0.0.1:2828"]
+match_executables = ["firefox", "firefox-bin"]
