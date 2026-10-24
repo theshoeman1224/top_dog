@@ -77,6 +77,8 @@ class TerminalTests(unittest.TestCase):
         self.session = Session()
         self.addCleanup(self.session.close)
         self.session.expect("TOP DOG")
+        # The header renders before the collector supplies a selectable process.
+        self.session.expect("\x1b[7m")
 
     def test_filter_help_confirmation_resize_and_quit(self):
         s = self.session
@@ -94,6 +96,8 @@ class TerminalTests(unittest.TestCase):
         s.expect("Action cancelled")
         s.resize(50, 12)
         os.kill(s.child.pid, signal.SIGWINCH)
+        # Wait for the footer at its resized position before sending more input.
+        s.expect("\x1b[12;1H\x1b[0mEnter inspect")
         s.send(b"?")
         s.expect("TOP DOG controls")
         s.send(b"\x1b")
