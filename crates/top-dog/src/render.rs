@@ -187,6 +187,13 @@ pub fn process_lines(view: &View, height: usize) -> Vec<Line> {
 }
 
 pub fn screen(app: &App, width: usize, height: usize) -> Vec<Line> {
+    let status = format!("{}{}", if app.busy { "[working] " } else { "" }, app.status);
+    let status: Vec<Line> = status
+        .lines()
+        .take(height.saturating_sub(2))
+        .map(|line| display_text(line).into())
+        .collect();
+    let body_height = height.saturating_sub(status.len() + 2);
     let mut lines = match &app.mode {
         Mode::Help => vec![
             "TOP DOG controls",
@@ -215,7 +222,7 @@ pub fn screen(app: &App, width: usize, height: usize) -> Vec<Line> {
                 .into(),
                 resolution.summary.clone().into(),
             ];
-            let capacity = height.saturating_sub(5) / 2;
+            let capacity = body_height.saturating_sub(2) / 2;
             let offset = cursor.saturating_sub(capacity.saturating_sub(1));
             for (i, target) in resolution
                 .targets
@@ -254,25 +261,19 @@ pub fn screen(app: &App, width: usize, height: usize) -> Vec<Line> {
         ],
         _ => {
             let details = app.details.len().min(4);
-            let mut out = process_lines(&app.view, height.saturating_sub(3 + details));
+            let mut out = process_lines(&app.view, body_height.saturating_sub(details));
             for detail in app.details.iter().take(4) {
                 out.push(detail.clone().into());
             }
             out
         }
     };
-    lines.truncate(height.saturating_sub(3));
-    while lines.len() < height.saturating_sub(3) {
+    lines.truncate(body_height);
+    while lines.len() < body_height {
         lines.push(String::new().into());
     }
-    lines.push(
-        format!(
-            "{}{}",
-            if app.busy { "[working] " } else { "" },
-            display_text(&app.status)
-        )
-        .into(),
-    );
+    lines.push(String::new().into());
+    lines.extend(status);
     lines.push(match &app.mode {Mode::Input(kind,text)=>format!("{kind:?}> {text}  [Enter: apply, Esc: cancel]"),_=>format!("Enter inspect | o open | / filter | P CPU | M RAM | Space pause | ? help | q quit   {}ms",app.refresh_ms)}.into());
     lines.truncate(height);
     for line in &mut lines {
