@@ -108,13 +108,49 @@ impl App {
                         Ok(Some((plugin, resolution))) if !resolution.targets.is_empty() => {
                             self.status = resolution.summary.clone();
                             if !matches!(self.mode, Mode::Normal) {
-                                self.status.push_str(" Press Enter again after closing the current dialog.");
-                            } else if open && resolution.targets.len() == 1 && resolution.targets[0].can_activate {
-                                self.activate(plugin, resolution.process, resolution.targets[0].id.clone());
-                            } else { self.mode = Mode::Targets { plugin, resolution, cursor: 0 }; }
+                                self.status.push_str(
+                                    " Press Enter again after closing the current dialog.",
+                                );
+                            } else if open
+                                && resolution.targets.len() == 1
+                                && resolution.targets[0].can_activate
+                            {
+                                self.activate(
+                                    plugin,
+                                    resolution.process,
+                                    resolution.targets[0].id.clone(),
+                                );
+                            } else {
+                                self.mode = Mode::Targets {
+                                    plugin,
+                                    resolution,
+                                    cursor: 0,
+                                };
+                            }
                         }
                         Ok(Some((_, resolution))) => self.status = resolution.summary,
-                        Ok(None) => self.status = "No plugin configured for this application. Process details are available below.".into(),
+                        Ok(None) => {
+                            let firefox = self.view.selected_process().is_some_and(|process| {
+                                let executable = process
+                                    .executable
+                                    .as_deref()
+                                    .or_else(|| process.command.split_whitespace().next())
+                                    .and_then(|path| std::path::Path::new(path).file_name())
+                                    .and_then(|name| name.to_str());
+                                matches!(process.name.as_str(), "firefox" | "firefox-bin")
+                                    || matches!(executable, Some("firefox" | "firefox-bin"))
+                            });
+                            self.status = if firefox {
+                                "No Firefox plugin configured for this application.\n\
+                                 Install top-dog-firefox if needed.\n\
+                                 Register top-dog-firefox in your top-dog config.\n\
+                                 Close Firefox normally, then restart with:\n\
+                                 firefox --marionette --remote-allow-system-access\n\
+                                 Run top-dog --doctor. Setup: docs/firefox.md"
+                            } else {
+                                "No plugin configured for this application. Process details are available below."
+                            }.into();
+                        }
                         Err(e) => self.status = format!("Integration unavailable: {e}"),
                     }
                 }
@@ -486,6 +522,104 @@ mod tests {
         assert!(!app.busy);
         assert!(app.details.is_empty());
         assert!(matches!(app.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn unconfigured_firefox_shows_setup_in_the_rendered_screen() {
+        for process in [
+            Process {
+                name: "Isolated Web Co".into(),
+                executable: Some("/snap/firefox/9036/usr/lib/firefox/firefox".into()),
+                ..Default::default()
+            },
+            Process {
+                name: "Isolated Web Co".into(),
+                command: "/usr/lib/firefox/firefox-bin -contentproc".into(),
+                ..Default::default()
+            },
+            Process {
+                name: "firefox".into(),
+                ..Default::default()
+            },
+        ] {
+            for open in [false, true] {
+                let mut app = App::new(Config::default());
+                let id = ProcessIdentity {
+                    pid: 63591,
+                    start_ticks: 474854,
+                };
+                app.view.replace(Snapshot {
+                    processes: vec![Process {
+                        identity: Some(id),
+                        ..process.clone()
+                    }],
+                    ..Default::default()
+                });
+                app.tx.send(Completed::Inspect {
+                    process: id,
+                    details: Ok("Executable: Firefox\nWorking directory: /proc/63591/fdinfo\nStart ticks: 474854\nPID namespace: pid:[4026531836]".into()),
+                    resolution: Box::new(Ok(None)),
+                    open,
+                }).unwrap();
+                assert!(app.poll());
+                for width in [60, 80, 120] {
+                    let lines = crate::render::screen(&app, width, 24);
+                    let screen = lines
+                        .iter()
+                        .map(|line| line.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    for expected in [
+                        "No Firefox plugin configured",
+                        "Register top-dog-firefox",
+                        "top-dog config",
+                        "Close Firefox normally",
+                        "firefox --marionette --remote-allow-system-access",
+                        "top-dog --doctor",
+                        "docs/firefox.md",
+                        "Start ticks: 474854",
+                    ] {
+                        assert!(
+                            screen.contains(expected),
+                            "missing {expected:?} at width {width}:\n{screen}"
+                        );
+                    }
+                    assert!(lines.len() <= 24);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unrelated_process_keeps_generic_missing_plugin_message() {
+        let mut app = App::new(Config::default());
+        let id = ProcessIdentity {
+            pid: 42,
+            start_ticks: 1,
+        };
+        app.view.replace(Snapshot {
+            processes: vec![Process {
+                identity: Some(id),
+                name: "bash".into(),
+                command: "bash firefox.sh".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        app.tx
+            .send(Completed::Inspect {
+                process: id,
+                details: Ok("details".into()),
+                resolution: Box::new(Ok(None)),
+                open: false,
+            })
+            .unwrap();
+        assert!(app.poll());
+        assert!(
+            app.status
+                .starts_with("No plugin configured for this application.")
+        );
+        assert!(!app.status.contains("Firefox"));
     }
 
     #[test]
