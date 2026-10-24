@@ -53,6 +53,8 @@ top-dog --batch --user "$USER"
 top-dog --help
 ```
 
+The process table truncates long usernames with `…` and marks numbers that exceed their column width with `#`.
+
 Batch and JSON modes apply the same sorting and filters. JSON emits one snapshot per line.
 
 ## Plugins and desktop support
